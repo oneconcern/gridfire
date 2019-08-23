@@ -83,10 +83,8 @@
 
 (comment
 
-  (with-redefs [*db-config* (assoc *db-config* :username "gridfireuser")]
-    (init-db))
-
   (startup-health-check :db-username "gridfireuser")
   (startup-health-check :db-username "gridfireuser" :skip-init true)
 
   )
+
