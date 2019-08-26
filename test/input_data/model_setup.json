@@ -1,0 +1,12 @@
+{"DOCKER_IP_OPEN" : 5432,
+"POSTGRES_USER_NAME" : "postgres",
+"POSTGRES_HOST" : "localhost",
+"POSTGRES_PASSWORD" : 123,
+"SRID" : 102039,
+"OUTPUT_LIST" : ["false", "true", "false", "false"],
+"FUEL_TAGS" : ["dem", "slp", "asp", "fbfm40", "ch", "cbh", "cbd", "cc"],
+"SCAR_TAGS" : ["ifi", "scar", "ifl"],
+"CUSTOM_PROJECTION" : 900914,
+"GRID_SIZE" : 30,
+"IGNITION_ROW" : 10,
+"IGNITION_COL" : 10}

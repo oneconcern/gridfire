@@ -78,6 +78,46 @@ org-mode (http://orgmode.org/worg/org-contrib/babel/). Full
 documentation of the current system can always be found in
 *org/GridFire.org* and *org/GridFire.pdf* in this repository.
 
+** REPL
+
+The beginnings of a REPL-driven development setup are in `dev/user.clj`.
+After installing [[Clojure][http://www.clojure.org]] and
+[[Leiningen][https://leiningen.org/]], and other dependencies -- on OS X for example,
+
+#+BEGIN_SRC sh
+brew install clojure leiningen postgresql postgis
+#+END_SRC
+
+start postgres with
+
+#+BEGIN_SRC sh
+./pginit/run_db.sh
+#+END_SRC
+
+and start a REPL with
+
+#+BEGIN_SRC sh
+lein repl
+#+END_SRC
+
+While the REPL is most effectively used with an editor integration such as
+[[CIDER][https://cider.readthedocs.io/en/latest/]], there is a function included
+to immediately verify the REPL is setup
+
+#+BEGIN_SRC clojure
+user=> (startup-health-check)
+#+END_SRC
+
+This function runs simulations and writes output files to the project root directory.
+
+*** misc notes
+
+The simulations draw input data from the postgres database.
+~startup-health-check~ populates the input database by default and so is expected
+to be evaluated once in default mode per ~./pginit/run_db.sh~ run.
+Use ~(startup-health-check :skip-init true)~ in order to run the simulations
+without restarting the database.
+
 * Contact
 
 *Authors:*

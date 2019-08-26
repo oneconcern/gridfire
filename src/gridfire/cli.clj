@@ -8,8 +8,8 @@
             [gridfire.surface-fire :refer [degrees-to-radians]]
             [gridfire.fire-spread :refer [run-fire-spread]]
             [matrix-viz.core :refer [save-matrix-as-png]]
-            [magellan.core :refer [register-new-crs-definitions-from-properties-file!
-                                   make-envelope matrix-to-raster write-raster]])
+            [gridfire.magellan :refer [register-new-crs-definitions-from-properties-file!
+                                       make-envelope matrix-to-raster write-raster]])
   (:import (java.util Random)))
 
 (m/set-current-implementation :vectorz)
@@ -226,48 +226,55 @@
                   "flame-length-stddev" "fire-line-intensity-mean" "fire-line-intensity-stddev"])
            (csv/write-csv out-file)))))
 
+(defn act-on-config
+  [config]
+  (let [landfire-layers  (fetch-landfire-layers (:db-spec config)
+                                                (:landfire-layers config))
+        landfire-rasters (into {}
+                               (map (fn [[layer info]] [layer (:matrix info)]))
+                               landfire-layers)
+        envelope         (let [{:keys [upperleftx upperlefty width height scalex scaley]}
+                               (landfire-layers :elevation)]
+                           (make-envelope (:srid config)
+                                          upperleftx
+                                          (+ upperlefty (* height scaley))
+                                          (* width scalex)
+                                          (* -1.0 height scaley)))
+        simulations      (:simulations config)
+        rand-generator   (if-let [seed (:random-seed config)]
+                           (Random. seed)
+                           (Random.))]
+    (when (:output-landfire-inputs? config)
+      (doseq [[layer matrix] landfire-rasters]
+        (-> (matrix-to-raster (name layer) matrix envelope)
+            (write-raster (str (name layer) (:outfile-suffix config) ".tif")))))
+    (->> (run-simulations
+          simulations
+          landfire-rasters
+          envelope
+          (:cell-size config)
+          (draw-samples rand-generator simulations (:ignition-row config))
+          (draw-samples rand-generator simulations (:ignition-col config))
+          (draw-samples rand-generator simulations (:max-runtime config))
+          (draw-samples rand-generator simulations (:temperature config))
+          (draw-samples rand-generator simulations (:relative-humidity config))
+          (draw-samples rand-generator simulations (:wind-speed-20ft config))
+          (draw-samples rand-generator simulations (:wind-from-direction config))
+          (draw-samples rand-generator simulations (:foliar-moisture config))
+          (draw-samples rand-generator simulations (:ellipse-adjustment-factor config))
+          (:outfile-suffix config)
+          (:output-geotiffs? config)
+          (:output-pngs? config)
+          (:output-csvs? config))
+         (write-csv-outputs
+          (:output-csvs? config)
+          (str "summary_stats" (:outfile-suffix config) ".csv")))))
+
+(defn act-on-config-file
+  [config-file]
+  (act-on-config (edn/read-string (slurp config-file))))
+
 (defn -main
   [& config-files]
   (doseq [config-file config-files]
-    (let [config           (edn/read-string (slurp config-file))
-          landfire-layers  (fetch-landfire-layers (:db-spec config)
-                                                  (:landfire-layers config))
-          landfire-rasters (into {}
-                                 (map (fn [[layer info]] [layer (:matrix info)]))
-                                 landfire-layers)
-          envelope         (let [{:keys [upperleftx upperlefty width height scalex scaley]}
-                                 (landfire-layers :elevation)]
-                             (make-envelope (:srid config)
-                                            upperleftx
-                                            (+ upperlefty (* height scaley))
-                                            (* width scalex)
-                                            (* -1.0 height scaley)))
-          simulations      (:simulations config)
-          rand-generator   (if-let [seed (:random-seed config)]
-                             (Random. seed)
-                             (Random.))]
-      (when (:output-landfire-inputs? config)
-        (doseq [[layer matrix] landfire-rasters]
-          (-> (matrix-to-raster (name layer) matrix envelope)
-              (write-raster (str (name layer) (:outfile-suffix config) ".tif")))))
-      (->> (run-simulations
-            simulations
-            landfire-rasters
-            envelope
-            (:cell-size config)
-            (draw-samples rand-generator simulations (:ignition-row config))
-            (draw-samples rand-generator simulations (:ignition-col config))
-            (draw-samples rand-generator simulations (:max-runtime config))
-            (draw-samples rand-generator simulations (:temperature config))
-            (draw-samples rand-generator simulations (:relative-humidity config))
-            (draw-samples rand-generator simulations (:wind-speed-20ft config))
-            (draw-samples rand-generator simulations (:wind-from-direction config))
-            (draw-samples rand-generator simulations (:foliar-moisture config))
-            (draw-samples rand-generator simulations (:ellipse-adjustment-factor config))
-            (:outfile-suffix config)
-            (:output-geotiffs? config)
-            (:output-pngs? config)
-            (:output-csvs? config))
-           (write-csv-outputs
-            (:output-csvs? config)
-            (str "summary_stats" (:outfile-suffix config) ".csv"))))))
+    (act-on-config-file config-file)))
