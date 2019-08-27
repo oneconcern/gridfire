@@ -8,13 +8,15 @@
    [gridfire.postgis-bridge :as postgis-bridge]
 
    [me.raynes.conch :as conch]
+
+   [taoensso.tufte :as tufte]
    ))
 
-(def *db-config*
+(def ^:dynamic *db-config*
   {:username "gjohnson"
    :db-name "gridfire"})
 
-(def *landfire-layer-name->db-table-name*
+(def ^:dynamic *landfire-layer-name->db-table-name*
   {:elevation "dem",
    :slope "slp",
    :aspect "asp",
@@ -84,7 +86,22 @@
 (comment
 
   (startup-health-check :db-username "gridfireuser")
-  (startup-health-check :db-username "gridfireuser" :skip-init true)
+
+  (let [[res pstats]
+        (tufte/profiled
+         {:dyanmic? true}
+         (startup-health-check :db-username "gridfireuser" :skip-init true))]
+    (tufte/format-pstats pstats))
+
+
+  (tufte/add-basic-println-handler! {})
+
+  (with-redefs [cli/*parallel-simulations* true
+                cli/*profile-simulation-runs* true]
+    (tufte/profile
+     {:dynamic? true}
+     (startup-health-check :db-username "gridfireuser" :skip-init true)))
+
 
   )
 

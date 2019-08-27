@@ -9,9 +9,11 @@
             [gridfire.fire-spread :refer [run-fire-spread]]
             [matrix-viz.core :refer [save-matrix-as-png]]
             [gridfire.magellan :refer [register-new-crs-definitions-from-properties-file!
-                                       make-envelope matrix-to-raster write-raster]])
+                                       make-envelope matrix-to-raster write-raster]]
+            [taoensso.tufte :as tufte]
+            [taoensso.timbre :as timbre])
   (:import (java.util Random)
-           (java.util.concurrent Executors)))
+           (java.util.concurrent Executors Future)))
 
 (m/set-current-implementation :vectorz)
 
@@ -142,12 +144,15 @@
    wind-from-direction foliar-moisture ellipse-adjustment-factor
    outfile-suffix output-geotiffs? output-pngs? output-csvs?
    i]
-   (let [equilibrium-moisture (calc-emc (relative-humidity i) (temperature i))
-         fuel-moisture        {:dead {:1hr        (+ equilibrium-moisture 0.002)
-                                      :10hr       (+ equilibrium-moisture 0.015)
-                                      :100hr      (+ equilibrium-moisture 0.025)}
-                               :live {:herbaceous (* equilibrium-moisture 2.0)
-                                      :woody      (* equilibrium-moisture 0.5)}}]
+  (timbre/debug "running simulation")
+  (let [equilibrium-moisture (calc-emc (relative-humidity i) (temperature i))
+        fuel-moisture        {:dead {:1hr        (+ equilibrium-moisture 0.002)
+                                     :10hr       (+ equilibrium-moisture 0.015)
+                                     :100hr      (+ equilibrium-moisture 0.025)}
+                              :live {:herbaceous (* equilibrium-moisture 2.0)
+                                     :woody      (* equilibrium-moisture 0.5)}}]
+    (tufte/p
+     ::run-simulation
      (if-let [fire-spread-results (run-fire-spread (max-runtime i)
                                                    cell-size
                                                    landfire-rasters
@@ -195,19 +200,38 @@
           :flame-length-mean          0.0
           :flame-length-stddev        0.0
           :fire-line-intensity-mean   0.0
-          :fire-line-intensity-stddev 0.0}))))
+          :fire-line-intensity-stddev 0.0})))))
+
+(def ^:dynamic *parallel-simulations* true)
+;; tufte's documentation of profiling accross Futures is somewhat sparse
+;; https://github.com/ptaoussanis/tufte#what-if-i-want-to-time-something-across-a-promise--async-handler--etc
+;; as a first pass, allow running a separate profile in each async task
+(def ^:dynamic *profile-simulation-runs* false)
 
 (defn run-simulations
   [ & args ]
+  (timbre/debug "running simulations")
   (let [run-sim (apply partial (conj args run-simulation))
         simulations (first args)
-        pool (Executors/newFixedThreadPool simulations)
         tasks (map
-               (fn [i] #(run-sim i))
+               (fn [i]
+                 (let [task #(run-sim i)]
+                   (if *profile-simulation-runs*
+                     (fn []
+                       (let [[res pstats] (tufte/profiled {:dyanmic? true} (task))]
+                         (timbre/info (tufte/format-pstats pstats))
+                         res))
+                     task)))
                (range simulations))]
-    (let [ret (.invokeAll pool tasks)]
-      (.shutdown pool)
-      (map #(.get %) ret))))
+    (tufte/p
+     ::run-simulations
+     (if *parallel-simulations*
+       (let [pool (Executors/newFixedThreadPool simulations)]
+         (let [ret (.invokeAll pool tasks)]
+           (.shutdown pool)
+           (map (fn [^Future rv] (.get rv)) ret)))
+       (for [task tasks]
+         (task))))))
 
 (defn write-csv-outputs
   [output-csvs? output-filename results-table]
