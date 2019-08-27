@@ -22,6 +22,8 @@
 
                      [me.raynes/fs "1.4.6"]
                      [me.raynes/conch "0.8.0"]
+                     [com.taoensso/tufte "2.0.1"]
+                     [com.taoensso/timbre "4.10.0"]
 
                      ;;
 

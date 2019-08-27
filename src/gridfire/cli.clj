@@ -9,8 +9,11 @@
             [gridfire.fire-spread :refer [run-fire-spread]]
             [matrix-viz.core :refer [save-matrix-as-png]]
             [gridfire.magellan :refer [register-new-crs-definitions-from-properties-file!
-                                       make-envelope matrix-to-raster write-raster]])
-  (:import (java.util Random)))
+                                       make-envelope matrix-to-raster write-raster]]
+            [taoensso.tufte :as tufte]
+            [taoensso.timbre :as timbre])
+  (:import (java.util Random)
+           (java.util.concurrent Executors Future)))
 
 (m/set-current-implementation :vectorz)
 
@@ -135,68 +138,100 @@
     (/ (* eta (Math/sqrt (+ 1 (Math/pow (* x wsp) 2))))
        0.3002)))
 
-(defn run-simulations
+(defn run-simulation
   [simulations landfire-rasters envelope cell-size ignition-row
    ignition-col max-runtime temperature relative-humidity wind-speed-20ft
    wind-from-direction foliar-moisture ellipse-adjustment-factor
-   outfile-suffix output-geotiffs? output-pngs? output-csvs?]
-  (mapv
-   (fn [i]
-     (let [equilibrium-moisture (calc-emc (relative-humidity i) (temperature i))
-           fuel-moisture        {:dead {:1hr        (+ equilibrium-moisture 0.002)
-                                        :10hr       (+ equilibrium-moisture 0.015)
-                                        :100hr      (+ equilibrium-moisture 0.025)}
-                                 :live {:herbaceous (* equilibrium-moisture 2.0)
-                                        :woody      (* equilibrium-moisture 0.5)}}]
-       (if-let [fire-spread-results (run-fire-spread (max-runtime i)
-                                                     cell-size
-                                                     landfire-rasters
-                                                     (wind-speed-20ft i)
-                                                     (wind-from-direction i)
-                                                     fuel-moisture
-                                                     (* 0.01 (foliar-moisture i))
-                                                     (ellipse-adjustment-factor i)
-                                                     [(ignition-row i)
-                                                      (ignition-col i)])]
-         (do
-           (doseq [[name layer] [["fire_spread"         :fire-spread-matrix]
-                                 ["flame_length"        :flame-length-matrix]
-                                 ["fire_line_intensity" :fire-line-intensity-matrix]]]
-             (when output-geotiffs?
-               (-> (matrix-to-raster name (fire-spread-results layer) envelope)
-                   (write-raster (str name outfile-suffix "_" i ".tif"))))
-             (when output-pngs?
-               (save-matrix-as-png :color 4 -1.0
-                                   (fire-spread-results layer)
-                                   (str name outfile-suffix "_" i ".png"))))
-           (when output-csvs?
-             (merge
-              {:ignition-row              (ignition-row i)
-               :ignition-col              (ignition-col i)
-               :max-runtime               (max-runtime i)
-               :temperature               (temperature i)
-               :relative-humidity         (relative-humidity i)
-               :wind-speed-20ft           (wind-speed-20ft i)
-               :wind-from-direction       (wind-from-direction i)
-               :foliar-moisture           (foliar-moisture i)
-               :ellipse-adjustment-factor (ellipse-adjustment-factor i)}
-              (summarize-fire-spread-results fire-spread-results cell-size))))
+   outfile-suffix output-geotiffs? output-pngs? output-csvs?
+   i]
+  (timbre/debug "running simulation")
+  (let [equilibrium-moisture (calc-emc (relative-humidity i) (temperature i))
+        fuel-moisture        {:dead {:1hr        (+ equilibrium-moisture 0.002)
+                                     :10hr       (+ equilibrium-moisture 0.015)
+                                     :100hr      (+ equilibrium-moisture 0.025)}
+                              :live {:herbaceous (* equilibrium-moisture 2.0)
+                                     :woody      (* equilibrium-moisture 0.5)}}]
+    (tufte/p
+     ::run-simulation
+     (if-let [fire-spread-results (run-fire-spread (max-runtime i)
+                                                   cell-size
+                                                   landfire-rasters
+                                                   (wind-speed-20ft i)
+                                                   (wind-from-direction i)
+                                                   fuel-moisture
+                                                   (* 0.01 (foliar-moisture i))
+                                                   (ellipse-adjustment-factor i)
+                                                   [(ignition-row i)
+                                                    (ignition-col i)])]
+       (do
+         (doseq [[name layer] [["fire_spread"         :fire-spread-matrix]
+                               ["flame_length"        :flame-length-matrix]
+                               ["fire_line_intensity" :fire-line-intensity-matrix]]]
+           (when output-geotiffs?
+             (-> (matrix-to-raster name (fire-spread-results layer) envelope)
+                 (write-raster (str name outfile-suffix "_" i ".tif"))))
+           (when output-pngs?
+             (save-matrix-as-png :color 4 -1.0
+                                 (fire-spread-results layer)
+                                 (str name outfile-suffix "_" i ".png"))))
          (when output-csvs?
-           {:ignition-row               (ignition-row i)
-            :ignition-col               (ignition-col i)
-            :max-runtime                (max-runtime i)
-            :temperature                (temperature i)
-            :relative-humidity          (relative-humidity i)
-            :wind-speed-20ft            (wind-speed-20ft i)
-            :wind-from-direction        (wind-from-direction i)
-            :foliar-moisture            (foliar-moisture i)
-            :ellipse-adjustment-factor  (ellipse-adjustment-factor i)
-            :fire-size                  0.0
-            :flame-length-mean          0.0
-            :flame-length-stddev        0.0
-            :fire-line-intensity-mean   0.0
-            :fire-line-intensity-stddev 0.0}))))
-   (range simulations)))
+           (merge
+            {:ignition-row              (ignition-row i)
+             :ignition-col              (ignition-col i)
+             :max-runtime               (max-runtime i)
+             :temperature               (temperature i)
+             :relative-humidity         (relative-humidity i)
+             :wind-speed-20ft           (wind-speed-20ft i)
+             :wind-from-direction       (wind-from-direction i)
+             :foliar-moisture           (foliar-moisture i)
+             :ellipse-adjustment-factor (ellipse-adjustment-factor i)}
+            (summarize-fire-spread-results fire-spread-results cell-size))))
+       (when output-csvs?
+         {:ignition-row               (ignition-row i)
+          :ignition-col               (ignition-col i)
+          :max-runtime                (max-runtime i)
+          :temperature                (temperature i)
+          :relative-humidity          (relative-humidity i)
+          :wind-speed-20ft            (wind-speed-20ft i)
+          :wind-from-direction        (wind-from-direction i)
+          :foliar-moisture            (foliar-moisture i)
+          :ellipse-adjustment-factor  (ellipse-adjustment-factor i)
+          :fire-size                  0.0
+          :flame-length-mean          0.0
+          :flame-length-stddev        0.0
+          :fire-line-intensity-mean   0.0
+          :fire-line-intensity-stddev 0.0})))))
+
+(def ^:dynamic *parallel-simulations* true)
+;; tufte's documentation of profiling accross Futures is somewhat sparse
+;; https://github.com/ptaoussanis/tufte#what-if-i-want-to-time-something-across-a-promise--async-handler--etc
+;; as a first pass, allow running a separate profile in each async task
+(def ^:dynamic *profile-simulation-runs* false)
+
+(defn run-simulations
+  [ & args ]
+  (timbre/debug "running simulations")
+  (let [run-sim (apply partial (conj args run-simulation))
+        simulations (first args)
+        tasks (map
+               (fn [i]
+                 (let [task #(run-sim i)]
+                   (if *profile-simulation-runs*
+                     (fn []
+                       (let [[res pstats] (tufte/profiled {:dyanmic? true} (task))]
+                         (timbre/info (tufte/format-pstats pstats))
+                         res))
+                     task)))
+               (range simulations))]
+    (tufte/p
+     ::run-simulations
+     (if *parallel-simulations*
+       (let [pool (Executors/newFixedThreadPool simulations)]
+         (let [ret (.invokeAll pool tasks)]
+           (.shutdown pool)
+           (map (fn [^Future rv] (.get rv)) ret)))
+       (for [task tasks]
+         (task))))))
 
 (defn write-csv-outputs
   [output-csvs? output-filename results-table]
